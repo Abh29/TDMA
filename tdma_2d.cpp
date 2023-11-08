@@ -11,6 +11,7 @@
 #include <SDL2/SDL_opengl.h>
 
 #include "include/Matrix.h"
+#include "omp.h"
 
 // define the initial width and height of the matrix, this can be changed at runtime
 #define NX  200
@@ -48,7 +49,7 @@ const float max = 1000, min = 0;
 
 // using two matrices as buffers
 using Mtrix = matrix_t<data_t>;
-Mtrix M, M2;
+Mtrix GM2;
 
 // helper functions for visualization
 double mapValInterval(float iMin, float iMax, float jMin, float jMax, float val) {
@@ -78,8 +79,8 @@ ImU32 mapValueToColor(float value) {
 // print the values to the terminal for debugging
 void printMatrix(Mtrix& M) {
 
-	for (int i = 0; i < M.N() + 2; ++i) {
-		for (int j = 0; j < M.M() + 2; ++j) {
+	for (size_t i = 0; i < M.N() + 2; ++i) {
+		for (size_t j = 0; j < M.M() + 2; ++j) {
 			std::cout << std::fixed << std::setw(8) <<  std::setprecision(3) <<  std::setfill('0') << M[i][j] << " ";
 		}
 		std::cout << std::endl;
@@ -91,12 +92,13 @@ void printMatrix(Mtrix& M) {
 }
 
 // create a matrix and fill it with initial and border values
-void initMatrix(Mtrix& M, int Nx, int Ny) {
+void initMatrix(Mtrix& M, size_t Nx, size_t Ny) {
 
 	M.init(Nx, Ny);
 
 	data_t dx = (LXn - LX0) / (data_t)Nx;
 	data_t dy = (LYn - LY0) / (data_t)Ny;
+	(void) dy; (void) dx;
 
 
 	// fill in initial values for x = 0 and x = n
@@ -112,12 +114,13 @@ void initMatrix(Mtrix& M, int Nx, int Ny) {
 	}
 
 	// fill in matrix with init values
-	for (int i = 1; i < Nx + 1; ++i) {
-		for (int j = 1; j < Ny + 1; ++j) {
+	for (size_t i = 1; i < Nx + 1; ++i) {
+		for (size_t j = 1; j < Ny + 1; ++j) {
 			M[i][j] = FT0(X(i, dx), Y(j, dy));
 		}
 	}
 
+	GM2 = M;
 }
 
 // calculate the values of a given row in the matrix
@@ -150,13 +153,13 @@ void calculateFixRow(Mtrix& M, int row, Mtrix& M2) {
 	v_beta[0] = M[row][0];
 
 	// forward substitution
-	for (int i = 1; i < M.M() + 2; ++i) {
+	for (size_t i = 1; i < M.M() + 2; ++i) {
 		v_alph[i] = - Bi(i) / (Ci(i) + Ai(i) * v_alph[i - 1]);
 		v_beta[i] = (- Ai(i) * v_beta[i - 1] + Di(i)) / (Ci(i) + Ai(i) * v_alph[i - 1]);
 	}
 
 	// backward substitution
-	for (int i = M.M(); i > 0; --i) {
+	for (size_t i = M.M(); i > 0; --i) {
 		M2[row][i] = v_alph[i] * M[row][i + 1] + v_beta[i];
 	}
 }
@@ -191,30 +194,29 @@ void calculateFixCol(Mtrix& M, int col, Mtrix& M2) {
 	v_beta[0] = M[1][col];
 
 	// forward substitution
-	for (int i = 1; i < M.N() + 2; ++i) {
+	for (size_t i = 1; i < M.N() + 2; ++i) {
 		v_alph[i] = -Bi(i) / (Ci(i) + Ai(i) * v_alph[i - 1]);
 		v_beta[i] = (Di(i) - Ai(i) * v_beta[i - 1]) / (Ci(i) + Ai(i) * v_alph[i - 1]);
 	}
 
 	// backward substitution
-	for (int i = M.N(); i > 0; --i) {
+	for (size_t i = M.N(); i > 0; --i) {
 		M2[i][col] = v_alph[i] * M[i + 1][col] + v_beta[i];
 	}
-
-
-
 }
 
 // calculate the values of each row then each column
 void calculate(Mtrix& M) {
 
-	M2 = M;
+	GM2 = M;
 
-	for (int i = 1; i < M.N() + 1; ++i)
-		calculateFixRow(M, i, M2);
+#pragma omp parallel for
+	for (size_t i = 1; i < M.N() + 1; ++i)
+		calculateFixRow(M, i, GM2);
 
-	for (int j = 1; j < M.M() + 1; ++j)
-		calculateFixCol(M2, j, M);
+#pragma omp parallel for
+	for (size_t j = 1; j < M.M() + 1; ++j)
+		calculateFixCol(GM2, j, M);
 }
 
 // initialize imgui with SDL
@@ -358,9 +360,9 @@ int plot(Mtrix& M, int* Nx, int *Ny) {
 		// draw the matrix to the surface
 		ImDrawList* dl = ImGui::GetWindowDrawList();
 		float xi, yi;
-		for (int i = 0; i < M.N() + 2; ++i) {
+		for (size_t i = 0; i < M.N() + 2; ++i) {
 			xi = 20.0f + (io.DisplaySize.x - 20) / float(M.N() + 2) * i;
-			for (int j = 0; j < M.M() + 2; ++j) {
+			for (size_t j = 0; j < M.M() + 2; ++j) {
 				yi = 90.0f + (io.DisplaySize.y - 90) / float(M.M() + 2) * j;
 				dl->AddRectFilled({xi,yi}, {xi + (io.DisplaySize.x - 20) / float(M.N() + 2), yi + (io.DisplaySize.y - 90) / float(M.M() + 2)}, mapValueToColor(M[i][j]));
 			}
@@ -385,13 +387,12 @@ int plot(Mtrix& M, int* Nx, int *Ny) {
 }
 
 // Main program
-int main(int argc, char** argv) {
-
+int main() {
 	int Nx = NX, Ny = NY;
+
+	Mtrix M;
 
 	initMatrix(M, Nx, Ny);
 	plot(M, &Nx, &Ny);
 
 }
-
-

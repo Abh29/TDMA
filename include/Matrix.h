@@ -9,8 +9,8 @@ template <typename T>
 struct matrix_t {
 
 private:
-	T *_data = nullptr;
 	size_t _N, _M;
+	T *_data = nullptr;
 
 public:
 
@@ -19,7 +19,7 @@ public:
 	using refrence = T&;
 
 	matrix_t() : _N(0), _M(0), _data(nullptr) {};
-	matrix_t(const matrix_t& other) : _N(other._N), _M(other._M) {
+	matrix_t(const matrix_t& other) : _N(other._N), _M(other._M), _data(nullptr) {
 		init(other.N(), other.M());
 		std::memcpy(_data, other._data, _N * _M * sizeof(T));
 	}
@@ -35,7 +35,7 @@ public:
 	}
 
 	void init(size_t N, size_t M) {
-		if (N == this->N() && M == this->M()) return;
+		if (N == this->N() && M == this->M() && _data) return;
 		this->clear();
 		_N = N + 2; _M = M + 2;
 		_data = new T[_N * _M];

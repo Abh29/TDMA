@@ -3,7 +3,9 @@ project(playground)
 
 set(CMAKE_CXX_STANDARD 17)
 
-#add_compile_options(-Wall -Werror -Wextra)
+add_compile_options(-Wall -Werror -Wextra)
+
+find_package(OpenMP REQUIRED)
 
 set(CMAKE_CXX_FLAGS " -lEGL -lGLU -lOpenGL ")
 
@@ -13,3 +15,7 @@ add_executable(task1 tdma_1d.cpp src/imgui.cpp src/imgui_impl_opengl3.cpp src/im
 
 add_executable(task2 tdma_2d.cpp src/imgui.cpp src/imgui_impl_opengl3.cpp src/imgui_draw.cpp
         src/imgui_tables.cpp src/imgui_widgets.cpp src/imgui_impl_sdl2.cpp src/imgui_demo.cpp)
+
+if (OpenMP_CXX_FOUND)
+    target_link_libraries(task2 PUBLIC OpenMP::OpenMP_CXX)
+endif()
