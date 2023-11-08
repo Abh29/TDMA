@@ -1,4 +1,4 @@
-# TDMA
+# TDMA (TriDiagonal Matrix Algorithm)
 This is a simple case of using Tomas algorithm to solve a mathematical equation of the type d²y/dx² = F(x) where we need to find y.
 
 
@@ -14,3 +14,12 @@ This is a simple case of using Tomas algorithm to solve a mathematical equation 
 *		beta(i) = (Bi + Di) / (Ci - Bi * alph(i - 1))
 
 *		for i = 0 	B0 = 0 		&&		for i = N	AN = 0
+
+
+## TDMA 1d
+in the file tdma_1d.cpp, I use the TDM algorithm to solve a 1 dimension equation of the type d²f/dx² = sin(x) with some border values, 
+now the mathematical solution for this equation is not that hard (f(x) = -sin(x)), and the TDMA should show a similar result
+
+## TDMA 2d
+in the file tdma_2d.cpp, I use the TDM algorithm to solve a 2 dimension Laplace equation (heat transfer in a square plate), now this where
+the iterative approach is clearer, the mathematical solution is a bit involved in this one, yet the iterative solution is much simpler 
