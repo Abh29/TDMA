@@ -1,3 +1,20 @@
+// Author: Wes Kendall
+// Copyright 2012 www.mpitutorial.com
+// This code is provided freely with the tutorials on mpitutorial.com. Feel
+// free to modify it for your own use. Any distribution of the code must
+// either provide a link to www.mpitutorial.com or keep this header intact.
+//
+// Program that computes the average of an array of elements in parallel using
+// MPI_Scatter and MPI_Gather
+//
+
+#include "iostream"
+#include "mpi.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <assert.h>
+
 #include "iostream"
 #include "vector"
 #include "cmath"
@@ -11,7 +28,6 @@
 #include <SDL2/SDL_opengl.h>
 
 #include "include/Matrix.h"
-#include "omp.h"
 
 // define the initial width and height of the matrix, this can be changed at runtime
 #define NX  200
@@ -41,8 +57,9 @@
 // define the increment of time delta_t
 #define DT 0.01f;
 
+
 // define the data type for the matrix
-using data_t = float;
+using data_t = double;
 
 // define the interval for the s component in HSV colors
 const float max = 1000, min = 0;
@@ -50,6 +67,7 @@ const float max = 1000, min = 0;
 // using two matrices as buffers
 using Mtrix = matrix_t<data_t>;
 Mtrix GM2;
+int g_world_size;
 
 // helper functions for visualization
 double mapValInterval(float iMin, float iMax, float jMin, float jMax, float val) {
@@ -210,11 +228,9 @@ void calculate(Mtrix& M) {
 
 	GM2 = M;
 
-#pragma omp parallel for
 	for (size_t i = 1; i < M.N() + 1; ++i)
 		calculateFixRow(M, i, GM2);
 
-#pragma omp parallel for
 	for (size_t j = 1; j < M.M() + 1; ++j)
 		calculateFixCol(GM2, j, M);
 }
@@ -283,15 +299,61 @@ void freeImGui(SDL_Window** window, SDL_GLContext* gl_context) {
 	SDL_Quit();
 }
 
+// divide the workload on the nodes of the comm and read results from node 0
+void scatter(Mtrix& M) {
+	int	begin;
+	int cols = NY + 2;
+	int rows = NX / (g_world_size - 1) + 2;
+
+	// sending workloads
+	begin = 0;
+	for (int i = 1; i < g_world_size; ++i) {
+		MPI_Send(M[begin], cols * rows, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
+		begin += rows - 2;
+	}
+	MPI_Barrier(MPI_COMM_WORLD);
+
+	// receiving results
+	begin = 0;
+	for (int i = 1; i < g_world_size; ++i) {
+		MPI_Recv(M[begin + 1], (rows - 2) * cols, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+		begin += rows - 2;
+	}
+	MPI_Barrier(MPI_COMM_WORLD);
+
+	// do some preprocessing to the result before rendering with the results
+	// ...
+}
+
+// receive a workload do calculation and send the results back to node 0
+void receive(Mtrix &subM, int world_rank) {
+	int cols = NY + 2;
+	int rows = NX / (g_world_size - 1) + 2;
+
+	(void) world_rank;
+	while (true) {
+		// receiving the workload
+		MPI_Recv(subM.data(), rows * cols, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+		MPI_Barrier(MPI_COMM_WORLD);
+
+		// do calculations
+		calculate(subM);
+
+		// send back the results
+		MPI_Send(subM[1], cols * (rows - 2), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+		MPI_Barrier(MPI_COMM_WORLD);
+	}
+}
+
+
 // draw the matrix to the window surface
 int plot(Mtrix& M, int* Nx, int *Ny) {
 	SDL_Window* window;
 	SDL_GLContext gl_context;
 	ImGuiWindowFlags window_flag;
 	ImVec4 clear_color;
-	static int nx_count = *Nx;
-	static int ny_count = *Ny;
 	static int ti;
+	(void) Nx; (void) Ny;
 
 	float tj = 0.0f;
 
@@ -339,23 +401,15 @@ int plot(Mtrix& M, int* Nx, int *Ny) {
 
 		// start imgui frame and add some settings to the window
 		ImGui::Begin("Plotter", NULL, window_flag);
-		ImGui::SliderInt("Nx count", &nx_count, 3, 250);
-		ImGui::SliderInt("Ny count", &ny_count, 3, 250);
 		ImGui::SliderInt("T", &ti, 0, 0);
 
-		// reinitialize the matrix if the dimensions were changed
-		if (nx_count != *Nx || ny_count != *Ny) {
-			*Nx = nx_count;
-			*Ny = ny_count;
-			initMatrix(M, *Nx, *Ny);
-			ti = 0;
-			tj = 0.0f;
-		}
 
 		// calculate a new iteration after dt
 		tj += DT;
 		ti = int(std::floor(tj));
-		calculate(M);
+
+		// divide the workload
+		scatter(M);
 
 		// draw the matrix to the surface
 		ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -386,13 +440,36 @@ int plot(Mtrix& M, int* Nx, int *Ny) {
 	return 0;
 }
 
+
 // Main program
 int main() {
-	int Nx = NX, Ny = NY;
+	// init mpi
+	MPI_Init(NULL, NULL);
 
-	Mtrix M;
+	// get mpi info
+	int world_rank;
+	MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+	MPI_Comm_size(MPI_COMM_WORLD, &g_world_size);
 
-	initMatrix(M, Nx, Ny);
-	plot(M, &Nx, &Ny);
 
+	// We are assuming at least 2 processes for this task
+	if (g_world_size < 2) {
+		std::cerr << "World size must be greater than 1" << std::endl;
+		MPI_Abort(MPI_COMM_WORLD, 1);
+	}
+
+	if (world_rank == 0) {
+		int Nx = NX, Ny = NY;
+		Mtrix M;
+		initMatrix(M, Nx, Ny);
+		plot(M, &Nx, &Ny);
+	} else {
+		Mtrix subM;
+		subM.init(NX /( g_world_size - 1), NY);
+		receive(subM, world_rank);
+	}
+
+	MPI_Abort(MPI_COMM_WORLD, 0);
+	MPI_Finalize();
 }
+

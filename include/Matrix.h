@@ -34,13 +34,26 @@ public:
 		return *this;
 	}
 
+	void swap(matrix_t& other) {
+		size_t t = _N;
+		_N = other._N;
+		other._N = t;
+
+		t = _M;
+		_M = other._M;
+		other._M = t;
+
+		T *p = _data;
+		_data = other._data;
+		other._data = p;
+	}
 	void init(size_t N, size_t M) {
 		if (N == this->N() && M == this->M() && _data) return;
 		this->clear();
 		_N = N + 2; _M = M + 2;
 		_data = new T[_N * _M];
 	}
-
+	pointer data() const {return _data;}
 	void clear() {
 		if (_data == nullptr) return;
 		delete[] _data;
